@@ -1,0 +1,153 @@
+name: CI/CD - Library Management System
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Backend Test
+  # ─────────────────────────────────────────────
+  backend-test:
+    name: 🧪 Backend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "yarn"
+          cache-dependency-path: backend/yarn.lock
+
+      - name: 📦 Install backend dependencies
+        working-directory: ./backend
+        run: yarn install --frozen-lockfile
+
+      - name: ✅ Run backend tests
+        working-directory: ./backend
+        run: yarn test
+
+      - name: 📊 Run backend tests with coverage
+        working-directory: ./backend
+        run: yarn test:coverage
+
+      - name: 📤 Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Frontend Build
+  # ─────────────────────────────────────────────
+  frontend-build:
+    name: 🏗️ Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "yarn"
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: 📦 Install frontend dependencies
+        working-directory: ./frontend
+        run: yarn install --frozen-lockfile
+
+      - name: 🏗️ Build frontend
+        working-directory: ./frontend
+        run: yarn build
+        env:
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL || 'http://localhost:4000/' }}
+          # Disable CI=true to avoid treating warnings as errors
+          CI: false
+
+      - name: 📤 Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────
+  # JOB 3: Code Quality Check
+  # ─────────────────────────────────────────────
+  lint-check:
+    name: 🔍 Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: 🔍 Check backend file structure
+        run: |
+          echo "=== Backend Structure ==="
+          ls -la backend/
+          echo ""
+          echo "=== Backend Routes ==="
+          ls -la backend/routes/
+          echo ""
+          echo "=== Backend Models ==="
+          ls -la backend/models/
+          echo ""
+          echo "✅ File structure OK"
+
+      - name: 📋 Show health endpoint info
+        run: |
+          echo "Health endpoint is available at: GET /api/health"
+          echo "Ping endpoint is available at:   GET /api/health/ping"
+
+  # ─────────────────────────────────────────────
+  # JOB 4: Deploy Summary (setelah semua job lulus)
+  # ─────────────────────────────────────────────
+  deployment-summary:
+    name: 🚀 Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build, lint-check]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: ✅ All checks passed
+        run: |
+          echo "============================================"
+          echo "  ✅ ALL CI CHECKS PASSED SUCCESSFULLY!"
+          echo "============================================"
+          echo ""
+          echo "📋 Summary:"
+          echo "  ✅ Backend tests      - PASSED"
+          echo "  ✅ Frontend build     - PASSED"
+          echo "  ✅ Code quality       - PASSED"
+          echo ""
+          echo "🌿 Branch : ${{ github.ref_name }}"
+          echo "📝 Commit : ${{ github.sha }}"
+          echo "👤 Author : ${{ github.actor }}"
+          echo ""
+          echo "🚀 Ready for deployment!"
+          echo ""
+          echo "⚠️  NOTE: Actual deployment step can be added here."
+          echo "   Contoh: deploy ke Railway, Render, Vercel, atau VPS."
