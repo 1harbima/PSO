@@ -83,6 +83,9 @@ jobs:
           REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
           # Matikan CI=true agar warning React tidak dianggap error
           CI: false
+          # Fix ERR_OSSL_EVP_UNSUPPORTED: react-scripts 4.x tidak kompatibel
+          # dengan OpenSSL bawaan Node 17+, perlu flag legacy provider
+          NODE_OPTIONS: --openssl-legacy-provider
 
       - name: 📤 Upload build artifact
         uses: actions/upload-artifact@v4
