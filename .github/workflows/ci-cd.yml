@@ -1,18 +1,22 @@
 name: CI/CD - Library Management System
 
+# ─────────────────────────────────────────────────────────
+# Trigger:
+#   push ke main        → CI + CD (test, build, deploy ke Azure)
+#   pull_request ke main → CI saja (test & build, TIDAK deploy)
+# ─────────────────────────────────────────────────────────
 on:
   push:
     branches:
       - main
-      - develop
   pull_request:
     branches:
       - main
-      - develop
 
 jobs:
   # ─────────────────────────────────────────────
   # JOB 1: Backend Test
+  # Trigger: semua push & PR ke main
   # ─────────────────────────────────────────────
   backend-test:
     name: 🧪 Backend Tests
@@ -37,7 +41,7 @@ jobs:
         working-directory: ./backend
         run: yarn test
 
-      - name: 📊 Run backend tests with coverage
+      - name: 📊 Run tests with coverage report
         working-directory: ./backend
         run: yarn test:coverage
 
@@ -50,6 +54,7 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 2: Frontend Build
+  # Trigger: semua push & PR ke main
   # ─────────────────────────────────────────────
   frontend-build:
     name: 🏗️ Frontend Build
@@ -70,12 +75,13 @@ jobs:
         working-directory: ./frontend
         run: yarn install --frozen-lockfile
 
-      - name: 🏗️ Build frontend
+      - name: 🏗️ Build React app
         working-directory: ./frontend
         run: yarn build
         env:
-          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL || 'http://localhost:4000/' }}
-          # Disable CI=true to avoid treating warnings as errors
+          # URL backend production di Azure (diambil dari GitHub Secrets)
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+          # Matikan CI=true agar warning React tidak dianggap error
           CI: false
 
       - name: 📤 Upload build artifact
@@ -87,6 +93,7 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 3: Code Quality Check
+  # Trigger: semua push & PR ke main
   # ─────────────────────────────────────────────
   lint-check:
     name: 🔍 Code Quality
@@ -96,12 +103,7 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-
-      - name: 🔍 Check backend file structure
+      - name: 🔍 Verify project structure
         run: |
           echo "=== Backend Structure ==="
           ls -la backend/
@@ -114,40 +116,111 @@ jobs:
           echo ""
           echo "✅ File structure OK"
 
-      - name: 📋 Show health endpoint info
+      - name: 📋 Show API endpoint info
         run: |
-          echo "Health endpoint is available at: GET /api/health"
-          echo "Ping endpoint is available at:   GET /api/health/ping"
+          echo "Health endpoint : GET /api/health"
+          echo "Ping endpoint   : GET /api/health/ping"
 
   # ─────────────────────────────────────────────
-  # JOB 4: Deploy Summary (setelah semua job lulus)
+  # JOB 4: Deploy Backend → Azure App Service
+  # Trigger: hanya push ke main (bukan PR)
+  # Syarat : backend-test & lint-check harus lulus
   # ─────────────────────────────────────────────
-  deployment-summary:
-    name: 🚀 Deployment Summary
+  deploy-backend:
+    name: ☁️ Deploy Backend → Azure App Service
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-build, lint-check]
+    needs: [backend-test, lint-check]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ✅ All checks passed
+      - name: 🟢 Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "yarn"
+          cache-dependency-path: backend/yarn.lock
+
+      - name: 📦 Install production dependencies only
+        working-directory: ./backend
+        # --production: tidak install devDependencies (jest, nodemon, dll)
+        # menghemat ukuran package yang di-deploy ke Azure
+        run: yarn install --frozen-lockfile --production
+
+      - name: 🚀 Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          # Nama App Service di Azure (dari GitHub Secret)
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          # Publish profile yang didownload dari Azure Portal
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          # Folder yang di-deploy (hanya backend/)
+          package: ./backend
+
+  # ─────────────────────────────────────────────
+  # JOB 5: Deploy Frontend → Azure Static Web Apps
+  # Trigger: hanya push ke main (bukan PR)
+  # Syarat : frontend-build harus lulus
+  # ─────────────────────────────────────────────
+  deploy-frontend:
+    name: ☁️ Deploy Frontend → Azure Static Web Apps
+    runs-on: ubuntu-latest
+    needs: [frontend-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🚀 Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          # Token deploy dari Azure Static Web Apps (dari GitHub Secret)
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          # Token GitHub untuk update PR status (otomatis tersedia)
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          # Lokasi source code frontend
+          app_location: "/frontend"
+          # Folder output hasil build React
+          output_location: "build"
+          # Command untuk build frontend
+          app_build_command: "yarn build"
+        env:
+          # URL backend Azure (dipakai saat build React)
+          REACT_APP_API_URL: ${{ secrets.REACT_APP_API_URL }}
+
+  # ─────────────────────────────────────────────
+  # JOB 6: Deployment Summary
+  # Trigger: hanya setelah Job 4 & 5 selesai di main
+  # ─────────────────────────────────────────────
+  deployment-summary:
+    name: 🚀 Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: 🎉 Deployment Complete
         run: |
           echo "============================================"
-          echo "  ✅ ALL CI CHECKS PASSED SUCCESSFULLY!"
+          echo "   🎉 DEPLOYMENT TO AZURE SUCCESSFUL!"
           echo "============================================"
           echo ""
-          echo "📋 Summary:"
+          echo "📋 CI/CD Summary:"
           echo "  ✅ Backend tests      - PASSED"
           echo "  ✅ Frontend build     - PASSED"
           echo "  ✅ Code quality       - PASSED"
+          echo "  ✅ Backend deployed   - AZURE APP SERVICE"
+          echo "  ✅ Frontend deployed  - AZURE STATIC WEB APPS"
           echo ""
-          echo "🌿 Branch : ${{ github.ref_name }}"
-          echo "📝 Commit : ${{ github.sha }}"
-          echo "👤 Author : ${{ github.actor }}"
+          echo "🌐 Backend  URL : https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          echo "🔍 Health Check : https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health"
           echo ""
-          echo "🚀 Ready for deployment!"
+          echo "🌿 Branch  : ${{ github.ref_name }}"
+          echo "📝 Commit  : ${{ github.sha }}"
+          echo "👤 Author  : ${{ github.actor }}"
           echo ""
-          echo "⚠️  NOTE: Actual deployment step can be added here."
-          echo "   Contoh: deploy ke Railway, Render, Vercel, atau VPS."
+          echo "🚀 Library Management System is LIVE on Azure!"
