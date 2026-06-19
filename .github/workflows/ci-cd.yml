@@ -1,0 +1,39 @@
+name: PSO DevOps Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # Tahap 1: Continuous Integration (CI)
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: echo "Menyiapkan environment untuk pipeline CI/CD..."
+
+      - name: Run Integration Tests
+        run: bash test-simulation.sh
+
+  # Tahap 2: Continuous Deployment (CD)
+  deploy:
+    needs: build-and-test # Menunggu CI sukses terlebih dahulu
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Simulate Deployment to Production
+        run: |
+          echo "Mulai proses Continuous Deployment (CD)..."
+          echo "Menghubungkan ke server Kelompok 9..."
+          echo "Menyalin file aplikasi ke server..."
+          echo "Restarting web service..."
+          echo "Aplikasi berhasil di-deploy ke production!"
